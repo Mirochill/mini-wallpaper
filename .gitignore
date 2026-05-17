@@ -19,3 +19,7 @@ env/
 Thumbs.db
 .vscode/
 .idea/
+
+
+# Build outputs
+dist-native/
