@@ -32,10 +32,23 @@ Le code source est dans `native-wpf/`.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\native-wpf\build.ps1
-.\dist-native\mini_wallpaper_native.exe
+.\dist-native\mini_wallpaper.exe
 ```
 
 La version finale n’embarque ni navigateur, ni lecteur vidéo tiers.
+
+## Installation
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\native-wpf\install.ps1
+```
+
+Le script :
+
+- compile la version native ;
+- copie l’exécutable dans `%LOCALAPPDATA%/Programs/MiniWallpaper/` ;
+- active le lancement automatique avec Windows ;
+- lance l’application installée.
 
 ## État actuel
 

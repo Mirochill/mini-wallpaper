@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $outputDir = Join-Path $projectRoot "dist-native"
-$outputExe = Join-Path $outputDir "mini_wallpaper_native.exe"
+$outputExe = Join-Path $outputDir "mini_wallpaper.exe"
 $compiler = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 $wpfRoot = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\WPF"
 $windowsBase = Join-Path $wpfRoot "WindowsBase.dll"
