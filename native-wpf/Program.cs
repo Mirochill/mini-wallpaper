@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Forms;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Win32;
 
@@ -29,11 +30,14 @@ namespace MiniWallpaper.Native
         private const string RunValueName = "MiniWallpaper";
         private readonly string _configDirectory;
         private readonly string _configPath;
+        private readonly Grid _root;
         private readonly MediaElement _media;
+        private readonly System.Windows.Controls.Image _image;
         private readonly DispatcherTimer _timer;
         private readonly NotifyIcon _trayIcon;
         private readonly ToolStripMenuItem _pauseItem;
         private readonly ToolStripMenuItem _startupItem;
+        private GifAnimation _gifAnimation;
         private bool _manualPaused;
         private bool _fullscreenPaused;
 
@@ -53,6 +57,11 @@ namespace MiniWallpaper.Native
             Height = SystemParameters.PrimaryScreenHeight;
             Background = System.Windows.Media.Brushes.Black;
 
+            _root = new Grid
+            {
+                Background = System.Windows.Media.Brushes.Black
+            };
+
             _media = new MediaElement
             {
                 LoadedBehavior = MediaState.Manual,
@@ -65,7 +74,16 @@ namespace MiniWallpaper.Native
                 _media.Position = TimeSpan.Zero;
                 _media.Play();
             };
-            Content = _media;
+
+            _image = new System.Windows.Controls.Image
+            {
+                Stretch = Stretch.UniformToFill,
+                Visibility = Visibility.Collapsed
+            };
+
+            _root.Children.Add(_media);
+            _root.Children.Add(_image);
+            Content = _root;
 
             SourceInitialized += delegate
             {
@@ -171,7 +189,7 @@ namespace MiniWallpaper.Native
             using (var dialog = new System.Windows.Forms.OpenFileDialog())
             {
                 dialog.Title = "Choisir un fond animé";
-                dialog.Filter = "Vidéos|*.mp4;*.wmv;*.avi;*.mov|Tous les fichiers|*.*";
+                dialog.Filter = "Fonds animés|*.mp4;*.wmv;*.avi;*.mov;*.gif|Vidéos|*.mp4;*.wmv;*.avi;*.mov|GIF animés|*.gif|Tous les fichiers|*.*";
                 dialog.CheckFileExists = true;
                 if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
                 {
@@ -184,10 +202,19 @@ namespace MiniWallpaper.Native
         {
             Directory.CreateDirectory(_configDirectory);
             File.WriteAllText(_configPath, path);
-            _media.Source = new Uri(path, UriKind.Absolute);
             _manualPaused = false;
             _pauseItem.Text = "Mettre en pause";
-            _media.Play();
+
+            var extension = Path.GetExtension(path);
+            if (String.Equals(extension, ".gif", StringComparison.OrdinalIgnoreCase))
+            {
+                ShowGif(path);
+            }
+            else
+            {
+                ShowVideo(path);
+            }
+
             ApplyPlaybackState();
         }
 
@@ -195,11 +222,55 @@ namespace MiniWallpaper.Native
         {
             if (_manualPaused || _fullscreenPaused)
             {
-                _media.Pause();
+                if (_gifAnimation != null)
+                {
+                    _gifAnimation.Pause();
+                }
+                else
+                {
+                    _media.Pause();
+                }
             }
             else
             {
-                _media.Play();
+                if (_gifAnimation != null)
+                {
+                    _gifAnimation.Play();
+                }
+                else
+                {
+                    _media.Play();
+                }
+            }
+        }
+
+        private void ShowVideo(string path)
+        {
+            StopGif();
+            _image.Visibility = Visibility.Collapsed;
+            _media.Visibility = Visibility.Visible;
+            _media.Source = new Uri(path, UriKind.Absolute);
+            _media.Play();
+        }
+
+        private void ShowGif(string path)
+        {
+            _media.Stop();
+            _media.Source = null;
+            _media.Visibility = Visibility.Collapsed;
+            _image.Visibility = Visibility.Visible;
+
+            StopGif();
+            _gifAnimation = new GifAnimation(_image, path);
+            _gifAnimation.Play();
+        }
+
+        private void StopGif()
+        {
+            if (_gifAnimation != null)
+            {
+                _gifAnimation.Dispose();
+                _gifAnimation = null;
             }
         }
 
@@ -225,6 +296,95 @@ namespace MiniWallpaper.Native
                     key.DeleteValue(RunValueName, false);
                 }
             }
+        }
+    }
+
+    internal sealed class GifAnimation : IDisposable
+    {
+        private readonly System.Windows.Controls.Image _image;
+        private readonly BitmapDecoder _decoder;
+        private readonly DispatcherTimer _timer;
+        private int _frameIndex;
+
+        public GifAnimation(System.Windows.Controls.Image image, string path)
+        {
+            _image = image;
+            _decoder = BitmapDecoder.Create(
+                new Uri(path, UriKind.Absolute),
+                BitmapCreateOptions.PreservePixelFormat,
+                BitmapCacheOption.OnLoad);
+
+            _timer = new DispatcherTimer();
+            _timer.Tick += delegate
+            {
+                AdvanceFrame();
+            };
+
+            if (_decoder.Frames.Count > 0)
+            {
+                _image.Source = _decoder.Frames[0];
+                _timer.Interval = FrameDelay(_decoder.Frames[0]);
+            }
+        }
+
+        public void Play()
+        {
+            if (_decoder.Frames.Count <= 1)
+            {
+                return;
+            }
+
+            _timer.Start();
+        }
+
+        public void Pause()
+        {
+            _timer.Stop();
+        }
+
+        public void Dispose()
+        {
+            _timer.Stop();
+            _image.Source = null;
+        }
+
+        private void AdvanceFrame()
+        {
+            if (_decoder.Frames.Count == 0)
+            {
+                return;
+            }
+
+            _frameIndex = (_frameIndex + 1) % _decoder.Frames.Count;
+            var frame = _decoder.Frames[_frameIndex];
+            _image.Source = frame;
+            _timer.Interval = FrameDelay(frame);
+        }
+
+        private static TimeSpan FrameDelay(BitmapFrame frame)
+        {
+            var metadata = frame.Metadata as BitmapMetadata;
+            object delayValue = null;
+
+            try
+            {
+                if (metadata != null && metadata.ContainsQuery("/grctlext/Delay"))
+                {
+                    delayValue = metadata.GetQuery("/grctlext/Delay");
+                }
+            }
+            catch
+            {
+                delayValue = null;
+            }
+
+            var hundredths = delayValue == null ? 10 : Convert.ToInt32(delayValue);
+            if (hundredths < 2)
+            {
+                hundredths = 10;
+            }
+
+            return TimeSpan.FromMilliseconds(hundredths * 10);
         }
     }
 

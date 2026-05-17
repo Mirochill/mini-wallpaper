@@ -17,7 +17,7 @@ Au premier lancement :
 2. si ce fichier n’existe pas, elle ouvre un sélecteur de fichier ;
 3. elle enregistre la configuration dans `%LOCALAPPDATA%/MiniWallpaper/wallpaper.txt`.
 
-Formats visés dans ce premier jet : `mp4`, `wmv`, `avi`, `mov`.
+Formats visés dans ce premier jet : `mp4`, `wmv`, `avi`, `mov`, `gif`.
 
 Un menu dans la zone de notification permet ensuite de :
 
