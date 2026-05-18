@@ -1,7 +1,9 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -30,16 +32,18 @@ namespace MiniWallpaper.Native
         private const string RunValueName = "MiniWallpaper";
         private readonly string _configDirectory;
         private readonly string _configPath;
+        private readonly string _optimizedDirectory;
+        private readonly string _ffmpegPath;
         private readonly Grid _root;
         private readonly MediaElement _media;
         private readonly System.Windows.Controls.Image _image;
-        private readonly DispatcherTimer _timer;
         private readonly NotifyIcon _trayIcon;
         private readonly ToolStripMenuItem _pauseItem;
         private readonly ToolStripMenuItem _startupItem;
         private GifAnimation _gifAnimation;
+        private string _videoPath;
+        private bool _videoLoaded;
         private bool _manualPaused;
-        private bool _fullscreenPaused;
 
         public WallpaperWindow()
         {
@@ -47,6 +51,8 @@ namespace MiniWallpaper.Native
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "MiniWallpaper");
             _configPath = Path.Combine(_configDirectory, "wallpaper.txt");
+            _optimizedDirectory = Path.Combine(_configDirectory, "optimized");
+            _ffmpegPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ffmpeg.exe");
 
             WindowStyle = WindowStyle.None;
             ResizeMode = ResizeMode.NoResize;
@@ -67,7 +73,8 @@ namespace MiniWallpaper.Native
                 LoadedBehavior = MediaState.Manual,
                 UnloadedBehavior = MediaState.Manual,
                 Stretch = Stretch.UniformToFill,
-                Volume = 0.0
+                Volume = 0.0,
+                ScrubbingEnabled = false
             };
             _media.MediaEnded += delegate
             {
@@ -95,6 +102,8 @@ namespace MiniWallpaper.Native
             };
             Closed += delegate
             {
+                SleepVideo();
+                StopGif();
                 _trayIcon.Visible = false;
                 _trayIcon.Dispose();
             };
@@ -136,19 +145,6 @@ namespace MiniWallpaper.Native
                 ContextMenuStrip = menu,
                 Visible = true
             };
-
-            _timer = new DispatcherTimer();
-            _timer.Interval = TimeSpan.FromMilliseconds(500);
-            _timer.Tick += delegate
-            {
-                var fullscreen = NativeMethods.ForegroundWindowIsFullscreen();
-                if (fullscreen != _fullscreenPaused)
-                {
-                    _fullscreenPaused = fullscreen;
-                    ApplyPlaybackState();
-                }
-            };
-            _timer.Start();
         }
 
         private void LoadInitialWallpaper()
@@ -200,6 +196,8 @@ namespace MiniWallpaper.Native
 
         private void SetWallpaper(string path)
         {
+            path = PrepareWallpaper(path);
+
             Directory.CreateDirectory(_configDirectory);
             File.WriteAllText(_configPath, path);
             _manualPaused = false;
@@ -218,45 +216,197 @@ namespace MiniWallpaper.Native
             ApplyPlaybackState();
         }
 
+        private string PrepareWallpaper(string path)
+        {
+            if (String.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return path;
+            }
+
+            if (IsOptimizedWallpaper(path))
+            {
+                return path;
+            }
+
+            var extension = Path.GetExtension(path);
+            if (!IsOptimizableMedia(extension) || !File.Exists(_ffmpegPath))
+            {
+                return path;
+            }
+
+            Directory.CreateDirectory(_optimizedDirectory);
+            var optimizedPath = Path.Combine(_optimizedDirectory, OptimizedFileName(path));
+            if (File.Exists(optimizedPath))
+            {
+                return optimizedPath;
+            }
+
+            var temporaryPath = optimizedPath + ".tmp.mp4";
+            try
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+
+                RunFfmpeg(path, temporaryPath);
+                if (File.Exists(temporaryPath) && new FileInfo(temporaryPath).Length > 0)
+                {
+                    if (File.Exists(optimizedPath))
+                    {
+                        File.Delete(optimizedPath);
+                    }
+
+                    File.Move(temporaryPath, optimizedPath);
+                    return optimizedPath;
+                }
+            }
+            catch
+            {
+                // If an import cannot be optimized, keep the original usable instead of failing the wallpaper change.
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+
+            return path;
+        }
+
+        private bool IsOptimizedWallpaper(string path)
+        {
+            var optimizedRoot = Path.GetFullPath(_optimizedDirectory)
+                .TrimEnd(Path.DirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            var fullPath = Path.GetFullPath(path);
+            return fullPath.StartsWith(optimizedRoot, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsOptimizableMedia(string extension)
+        {
+            return String.Equals(extension, ".mp4", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(extension, ".wmv", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(extension, ".avi", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(extension, ".mov", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(extension, ".gif", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string OptimizedFileName(string path)
+        {
+            var info = new FileInfo(path);
+            var screen = System.Windows.Forms.Screen.PrimaryScreen.Bounds;
+            var fingerprint = String.Join("|",
+                Path.GetFullPath(path),
+                info.Length.ToString(),
+                info.LastWriteTimeUtc.Ticks.ToString(),
+                screen.Width.ToString(),
+                screen.Height.ToString(),
+                "fps30",
+                "crf23");
+
+            using (var sha256 = SHA256.Create())
+            {
+                var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(fingerprint));
+                var builder = new StringBuilder(hash.Length * 2);
+                foreach (var value in hash)
+                {
+                    builder.Append(value.ToString("x2"));
+                }
+
+                return builder.ToString() + ".mp4";
+            }
+        }
+
+        private void RunFfmpeg(string sourcePath, string outputPath)
+        {
+            var screen = System.Windows.Forms.Screen.PrimaryScreen.Bounds;
+            var filter = String.Format(
+                "scale=w='min(iw,{0})':h='min(ih,{1})':force_original_aspect_ratio=decrease,fps=30",
+                screen.Width,
+                screen.Height);
+            var arguments = String.Join(" ",
+                "-y",
+                "-i", Quote(sourcePath),
+                "-vf", Quote(filter),
+                "-c:v", "libx264",
+                "-preset", "slow",
+                "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                "-an",
+                Quote(outputPath));
+
+            var processStartInfo = new ProcessStartInfo
+            {
+                FileName = _ffmpegPath,
+                Arguments = arguments,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using (var process = Process.Start(processStartInfo))
+            {
+                if (process == null)
+                {
+                    throw new InvalidOperationException("Impossible de lancer ffmpeg.");
+                }
+
+                process.WaitForExit();
+                if (process.ExitCode != 0)
+                {
+                    throw new InvalidOperationException("ffmpeg a échoué.");
+                }
+            }
+        }
+
+        private static string Quote(string value)
+        {
+            return "\"" + value.Replace("\"", "\\\"") + "\"";
+        }
+
         private void ApplyPlaybackState()
         {
-            if (_manualPaused || _fullscreenPaused)
+            if (_gifAnimation != null)
             {
-                if (_gifAnimation != null)
+                if (_manualPaused)
                 {
                     _gifAnimation.Pause();
                 }
                 else
                 {
-                    _media.Pause();
+                    _gifAnimation.Play();
                 }
+
+                return;
+            }
+
+            WakeVideo();
+            if (_manualPaused)
+            {
+                _media.Pause();
             }
             else
             {
-                if (_gifAnimation != null)
-                {
-                    _gifAnimation.Play();
-                }
-                else
-                {
-                    _media.Play();
-                }
+                _media.Play();
             }
         }
 
         private void ShowVideo(string path)
         {
             StopGif();
+            SleepVideo();
+            _videoPath = path;
             _image.Visibility = Visibility.Collapsed;
             _media.Visibility = Visibility.Visible;
-            _media.Source = new Uri(path, UriKind.Absolute);
-            _media.Play();
         }
 
         private void ShowGif(string path)
         {
-            _media.Stop();
-            _media.Source = null;
+            SleepVideo();
+            _videoPath = null;
             _media.Visibility = Visibility.Collapsed;
             _image.Visibility = Visibility.Visible;
 
@@ -272,6 +422,32 @@ namespace MiniWallpaper.Native
                 _gifAnimation.Dispose();
                 _gifAnimation = null;
             }
+        }
+
+        private void WakeVideo()
+        {
+            if (String.IsNullOrWhiteSpace(_videoPath))
+            {
+                return;
+            }
+
+            if (!_videoLoaded)
+            {
+                _media.Source = new Uri(_videoPath, UriKind.Absolute);
+                _videoLoaded = true;
+            }
+        }
+
+        private void SleepVideo()
+        {
+            if (!_videoLoaded)
+            {
+                return;
+            }
+
+            _media.Stop();
+            _media.Source = null;
+            _videoLoaded = false;
         }
 
         private static bool StartupEnabled()
@@ -392,7 +568,6 @@ namespace MiniWallpaper.Native
     {
         private const uint SpawnWorkerW = 0x052C;
         private const uint SmtoNormal = 0x0000;
-        private const uint MonitorDefaultToNearest = 0x00000002;
 
         public static void AttachToDesktop(IntPtr window)
         {
@@ -413,40 +588,6 @@ namespace MiniWallpaper.Native
 
             SetParent(window, workerW == IntPtr.Zero ? progman : workerW);
         }
-
-        public static bool ForegroundWindowIsFullscreen()
-        {
-            var foreground = GetForegroundWindow();
-            if (foreground == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            var monitor = MonitorFromWindow(foreground, MonitorDefaultToNearest);
-            if (monitor == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            var monitorInfo = new MONITORINFO();
-            monitorInfo.cbSize = Marshal.SizeOf(typeof(MONITORINFO));
-            if (!GetMonitorInfo(monitor, ref monitorInfo))
-            {
-                return false;
-            }
-
-            RECT rect;
-            if (!GetWindowRect(foreground, out rect))
-            {
-                return false;
-            }
-
-            return rect.Left <= monitorInfo.rcMonitor.Left
-                && rect.Top <= monitorInfo.rcMonitor.Top
-                && rect.Right >= monitorInfo.rcMonitor.Right
-                && rect.Bottom >= monitorInfo.rcMonitor.Bottom;
-        }
-
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
@@ -475,34 +616,5 @@ namespace MiniWallpaper.Native
             uint timeout,
             out IntPtr result);
 
-        [DllImport("user32.dll")]
-        private static extern IntPtr GetForegroundWindow();
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
-
-        [DllImport("user32.dll", CharSet = CharSet.Auto)]
-        private static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO monitorInfo);
-
-        [DllImport("user32.dll")]
-        private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct RECT
-        {
-            public int Left;
-            public int Top;
-            public int Right;
-            public int Bottom;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct MONITORINFO
-        {
-            public int cbSize;
-            public RECT rcMonitor;
-            public RECT rcWork;
-            public uint dwFlags;
-        }
     }
 }

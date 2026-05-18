@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest an idea for Mini Wallpaper
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: Mini Wallpaper intentionally stays small, so tradeoffs matter here.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: tradeoffs
+    attributes:
+      label: Runtime or complexity tradeoffs
+      description: If this adds background work, dependencies, or UI surface, call it out.
+
