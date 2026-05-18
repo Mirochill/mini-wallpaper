@@ -49,7 +49,12 @@ if (-not $ffmpegSource) {
     throw "ffmpeg.exe introuvable. Installez ffmpeg ou relancez le script avec -FfmpegPath 'C:\chemin\vers\ffmpeg.exe'."
 }
 
-Copy-Item -LiteralPath $ffmpegSource -Destination $installedFfmpeg -Force
+$ffmpegSourceFullPath = [System.IO.Path]::GetFullPath($ffmpegSource)
+$installedFfmpegFullPath = [System.IO.Path]::GetFullPath($installedFfmpeg)
+if (-not [System.String]::Equals($ffmpegSourceFullPath, $installedFfmpegFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Copy-Item -LiteralPath $ffmpegSource -Destination $installedFfmpeg -Force
+}
+
 New-ItemProperty -Path $runKey -Name "MiniWallpaper" -PropertyType String -Value ('"' + $installedExe + '"') -Force | Out-Null
 
 Start-Process -FilePath $installedExe -WindowStyle Hidden
