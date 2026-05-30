@@ -1,29 +1,117 @@
 # Mini Wallpaper
 
-**An ultra-light animated wallpaper app for Windows.**
+<p align="center">
+  <img src="assets/hero-vivid.png" alt="Mini Wallpaper vivid animated desktop illustration" width="100%" />
+</p>
 
-![Mini Wallpaper hero banner](assets/hero.svg)
+<p align="center">
+  A focused, ultra-light animated wallpaper app for Windows.
+</p>
 
-Mini Wallpaper is for people who like the idea of Lively Wallpaper, but only need the focused part: play local animated wallpapers behind the desktop icons with as little overhead as possible.
+<p align="center">
+  <a href="https://github.com/Mirochill/mini-wallpaper/actions/workflows/ci.yml"><img src="https://github.com/Mirochill/mini-wallpaper/actions/workflows/ci.yml/badge.svg" alt="Windows CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
+  <a href="#requirements"><img src="https://img.shields.io/badge/platform-Windows-0078D6.svg" alt="Windows platform" /></a>
+  <a href="#requirements"><img src="https://img.shields.io/badge/runtime-native%20WPF-512BD4.svg" alt="Native WPF runtime" /></a>
+  <a href="#media-optimization"><img src="https://img.shields.io/badge/media-FFmpeg-5CB85C.svg" alt="FFmpeg optimization" /></a>
+</p>
 
-It is intentionally small:
+Mini Wallpaper is for people who like animated wallpapers but only need the
+focused part: play a local video or GIF behind the desktop icons with as little
+overhead as possible.
 
-- native WPF app, no browser runtime;
-- local media only, no wallpaper store or online catalog;
-- tray menu instead of a heavy management UI;
-- automatic media optimization before playback.
+It deliberately avoids a browser runtime, a wallpaper store, and a heavy
+management interface. Choose local media from the tray menu and let the app
+prepare a lean playback copy automatically.
 
-> Mini Wallpaper is an independent project and is not affiliated with Lively Wallpaper.
+> [!NOTE]
+> Mini Wallpaper is an independent project and is not affiliated with Lively
+> Wallpaper.
 
-## Why it exists
+## Highlights
 
-Lively Wallpaper is powerful, but many users only want one thing: a local animated wallpaper that stays out of the way.
+| Capability | Mini Wallpaper approach |
+| --- | --- |
+| Runtime | Native WPF window embedded behind the desktop icons |
+| Media source | Local files only |
+| Controls | Compact notification-area menu |
+| Optimization | Automatic FFmpeg transcoding before playback |
+| Cache | Deterministic optimized copies reused across launches |
+| Startup | Optional per-user Windows startup entry |
+| Dependencies | No browser runtime and no package manager at runtime |
 
-Mini Wallpaper trades breadth for efficiency. It does not try to be a full wallpaper platform. It tries to be the smallest pleasant tool that solves the core use case well.
+## Quick Start
 
-## What makes it lightweight
+### Download a release
 
-When you choose a wallpaper, Mini Wallpaper keeps the original untouched and creates an optimized playback copy in:
+Download `mini_wallpaper.exe` from the
+[latest release](https://github.com/Mirochill/mini-wallpaper/releases/latest)
+and place it in a folder of your choice.
+
+For automatic media optimization, place `ffmpeg.exe` next to
+`mini_wallpaper.exe`. Without FFmpeg, Mini Wallpaper can still play supported
+files directly, but it skips the optimization step.
+
+The published executable is not digitally signed, so Windows may display a
+warning on first launch. The complete source and build scripts remain
+available for auditing and local builds.
+
+### Install for the current user
+
+Clone the repository, ensure that `ffmpeg.exe` is available on `PATH`, then run:
+
+```powershell
+git clone https://github.com/Mirochill/mini-wallpaper.git
+cd mini-wallpaper
+powershell -ExecutionPolicy Bypass -File .\native-wpf\install.ps1
+```
+
+If FFmpeg is not on `PATH`, pass it explicitly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\native-wpf\install.ps1 -FfmpegPath "C:\path\to\ffmpeg.exe"
+```
+
+The installation script:
+
+1. builds the native executable;
+2. installs it into `%LOCALAPPDATA%\Programs\MiniWallpaper\`;
+3. copies `ffmpeg.exe` next to the installed app;
+4. enables launch at startup for the current user;
+5. starts Mini Wallpaper in the background.
+
+## Usage
+
+Mini Wallpaper lives in the Windows notification area. Open its tray menu to:
+
+| Action | Result |
+| --- | --- |
+| Choose a wallpaper | Select a local video or animated GIF |
+| Pause or resume | Temporarily stop or restart playback |
+| Launch at startup | Toggle the per-user Windows startup entry |
+| Quit | Close the wallpaper window and tray icon |
+
+On first launch, Mini Wallpaper checks for
+`Documents\Gifs\wallpaper.mp4`. If it cannot find a saved or default wallpaper,
+it opens the file picker.
+
+## Supported Media
+
+| Input format | Playback preparation |
+| --- | --- |
+| `.mp4` | Optimized MP4 playback copy when FFmpeg is available |
+| `.wmv` | Optimized MP4 playback copy when FFmpeg is available |
+| `.avi` | Optimized MP4 playback copy when FFmpeg is available |
+| `.mov` | Optimized MP4 playback copy when FFmpeg is available |
+| `.gif` | Converted to an optimized MP4 copy when FFmpeg is available |
+
+If optimization cannot complete, Mini Wallpaper keeps the original file
+usable instead of failing the wallpaper change.
+
+## Media Optimization
+
+Mini Wallpaper leaves the original file untouched and creates an optimized
+playback copy in:
 
 ```text
 %LOCALAPPDATA%\MiniWallpaper\optimized\
@@ -31,12 +119,30 @@ When you choose a wallpaper, Mini Wallpaper keeps the original untouched and cre
 
 The import pipeline:
 
+- converts supported media to H.264 MP4;
 - converts animated GIFs to MP4;
-- caps playback media at 30 fps;
-- scales videos down only when they exceed the primary monitor size;
-- stores deterministic cached copies so the same file is not transcoded again needlessly.
+- caps playback media at `30 fps`;
+- scales media down only when it exceeds the primary monitor resolution;
+- removes audio from the wallpaper copy;
+- stores deterministic cached copies so the same file is not transcoded again
+  needlessly.
 
-This matters because animated GIFs and oversized 4K60 videos are expensive formats for a desktop background.
+```mermaid
+flowchart LR
+    A[Choose local media] --> B{FFmpeg available?}
+    B -- No --> C[Play original file]
+    B -- Yes --> D[Create deterministic cache key]
+    D --> E{Optimized copy exists?}
+    E -- Yes --> F[Reuse cached MP4]
+    E -- No --> G[Scale if needed, cap at 30 fps, remove audio]
+    G --> H[Write optimized H.264 MP4]
+    H --> F
+    C --> I[Play behind desktop icons]
+    F --> I
+```
+
+This matters because animated GIFs and oversized `4K60` videos are expensive
+formats for a desktop background.
 
 ### Example from a real desktop
 
@@ -44,107 +150,82 @@ On the machine this project was built on:
 
 | Scenario | Before | After |
 | --- | ---: | ---: |
-| Wallpaper media | 4K60 MP4, 27.04 MB | 1080p30 MP4, 4.69 MB |
-| Mini Wallpaper private memory while playing | ~640 MB | ~210 MB |
+| Wallpaper media | `4K60 MP4`, `27.04 MB` | `1080p30 MP4`, `4.69 MB` |
+| Mini Wallpaper private memory while playing | `~640 MB` | `~210 MB` |
 
-Those numbers are a concrete local measurement, not a universal benchmark, but they show the kind of waste the app is designed to remove.
+These are concrete local measurements, not a universal benchmark. They show
+the kind of avoidable work the app is designed to remove.
 
-## Features
+## Local Files
 
-- MP4, WMV, AVI, MOV, and GIF input support
-- Automatic GIF-to-MP4 optimization
-- Native desktop embedding behind icons
-- Tray menu for:
-  - choosing a wallpaper
-  - pausing or resuming playback
-  - enabling launch at startup
-  - quitting the app
-- Automatic startup support
-- Original wallpaper files are never modified
+| Path | Purpose |
+| --- | --- |
+| `%LOCALAPPDATA%\MiniWallpaper\wallpaper.txt` | Stores the active wallpaper path |
+| `%LOCALAPPDATA%\MiniWallpaper\optimized\` | Stores cached playback copies |
+| `%LOCALAPPDATA%\Programs\MiniWallpaper\` | Default installation directory |
 
-## Non-goals
+Original wallpaper files are never modified.
 
-Mini Wallpaper is deliberately narrow. It currently does **not** include:
+## Build from Source
 
-- a wallpaper marketplace
-- web wallpapers
-- widgets
-- playlists
-- multi-monitor scene management
-- a large visual library manager
+### Requirements
 
-If you need a full wallpaper ecosystem, Lively Wallpaper is the better fit. If you only want a local animated wallpaper with very little baggage, Mini Wallpaper is built for that.
+- Windows 10 or Windows 11.
+- Windows PowerShell 5.1 or PowerShell 7.
+- .NET Framework 4.x tooling already available on Windows.
+- `ffmpeg.exe` for automatic media optimization during normal use.
 
-## Requirements
-
-- Windows
-- .NET Framework tooling already available on Windows for local builds
-- `ffmpeg.exe` available when running `native-wpf/install.ps1`
-  - the installer copies `ffmpeg.exe` next to the installed app so automatic optimization keeps working afterward
-
-## Quick start
-
-### Build locally
+### Build
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\native-wpf\build.ps1
 .\dist-native\mini_wallpaper.exe
 ```
 
-### Install for the current user
+The build uses the .NET Framework compiler already installed with Windows and
+does not require a NuGet restore.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\native-wpf\install.ps1
-```
+## Design Scope
 
-If `ffmpeg.exe` is not on `PATH`, pass it explicitly:
+Mini Wallpaper intentionally stays narrow. It currently does **not** include:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\native-wpf\install.ps1 -FfmpegPath "C:\path\to\ffmpeg.exe"
-```
+- a wallpaper marketplace;
+- web wallpapers;
+- widgets;
+- playlists;
+- multi-monitor scene management;
+- a large visual library manager.
 
-The installer:
+If you need a full wallpaper ecosystem, Lively Wallpaper is a better fit. If
+you only need a local animated wallpaper with very little baggage, Mini
+Wallpaper is designed for that.
 
-1. builds the native app;
-2. installs it to `%LOCALAPPDATA%\Programs\MiniWallpaper\`;
-3. copies `ffmpeg.exe` next to the executable;
-4. enables launch at startup;
-5. starts the installed app.
-
-## How wallpaper selection works
-
-1. On first launch, Mini Wallpaper looks for `Documents\Gifs\wallpaper.mp4`.
-2. If no saved wallpaper exists, it opens a file picker.
-3. When a media file is selected, it is optimized automatically.
-4. The active wallpaper path is stored in:
-
-```text
-%LOCALAPPDATA%\MiniWallpaper\wallpaper.txt
-```
-
-## Project layout
+## Project Layout
 
 ```text
 native-wpf/
   Program.cs      # application code
   build.ps1       # local build
-  install.ps1     # install + ffmpeg copy
+  install.ps1     # install, copy FFmpeg, enable startup
 ```
 
-## Development
+The implementation remains compact enough for its complete behavior to fit in
+one main source file.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\native-wpf\build.ps1
-```
+## Roadmap
 
-The project is intentionally compact so the full behavior can still be understood from one main source file.
+- Better multi-monitor handling.
+- Optional cache management UI.
+- Signed release builds.
+- A friendlier first-run installer.
 
-## Roadmap ideas
+## Contributing
 
-- better multi-monitor handling
-- optional cache management UI
-- signed release builds
-- a friendlier first-run installer
+Focused improvements are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md)
+before opening a pull request and follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
+Report vulnerabilities privately according to [SECURITY.md](SECURITY.md).
 
 ## License
 

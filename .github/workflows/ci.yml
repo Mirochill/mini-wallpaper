@@ -1,0 +1,34 @@
+name: CI Windows
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build native executable
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File .\native-wpf\build.ps1
+
+      - name: Verify build artifact
+        shell: powershell
+        run: |
+          $artifact = Get-Item -LiteralPath .\dist-native\mini_wallpaper.exe
+          if ($artifact.Length -le 0) {
+              throw "mini_wallpaper.exe is empty."
+          }
+          $artifact | Select-Object FullName, Length

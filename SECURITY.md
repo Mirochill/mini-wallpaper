@@ -2,9 +2,9 @@
 
 ## Reporting a vulnerability
 
-Please report security issues privately through GitHub security advisories when available for the repository.
-
-If that is not available, open a minimal issue asking for a private contact path without publishing exploit details.
+Please report security issues privately through
+[GitHub security advisories](https://github.com/Mirochill/mini-wallpaper/security/advisories/new).
+Do not open a public issue for an unpatched vulnerability.
 
 ## Scope
 
